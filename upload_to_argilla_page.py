@@ -1,116 +1,160 @@
 import streamlit as st
+import pandas as pd
+import argilla as rg
 
-@st.fragment
-def display_question_page():
-    # Initialize session state variables
-    if "questions" not in st.session_state:
-        st.session_state.questions = []
-    if "selected_question_type" not in st.session_state:
-        st.session_state.selected_question_type = "Label"  # Default to Label
-
-    # Initialize form-related session state variables
-    if "form_data_title" not in st.session_state:
-        st.session_state.form_data_title = ""
-    if "form_data_description" not in st.session_state:
-        st.session_state.form_data_description = ""
-    if "form_data_labels" not in st.session_state:
-        st.session_state.form_data_labels = ""
-    if "labels_input_key" not in st.session_state:
-        st.session_state.labels_input_key = "labels_input_0"
-
-    st.markdown("### Add Questions and Related Information")
-
-    # Dropdown for selecting question type (outside the form)
-    st.markdown("**Select question type:**")
-    selected_question_type = st.selectbox(
-        "Choose the type of question",
-        ["Label", "Multi-label", "Rating"],
-        index=["Label", "Multi-label", "Rating"].index(st.session_state.selected_question_type)
-    )
-
-    # Update session state when the user changes the question type
-    st.session_state.selected_question_type = selected_question_type
-
-    # Input fields for adding a question within a form
-    question_title = st.text_input(
-        "Describe Question Title (e.g., overall Quality):",
-        value=st.session_state.form_data_title,
-        key="question_title"
-    )
-    label_description = st.text_input(
-        "Describe Question information (e.g., overall Quality of LLM Response):",
-        value=st.session_state.form_data_description,
-        key="label_description"
-    )
-
-    # Conditionally show labels input based on question type
-    labels = []
-    if st.session_state.selected_question_type in ["Label", "Multi-label"]:
-        st.markdown(f"**Define possible {st.session_state.selected_question_type.lower()} options (comma-separated):**")
-        labels_input_key = st.session_state.labels_input_key
-        labels_input = st.text_input(
-            "Example: Good, Average, Bad",
-            value=st.session_state.form_data_labels,
-            key=labels_input_key
-        )
-        labels = [label.strip() for label in labels_input.split(",") if label.strip()]
-
-    submit_button = st.button("Add Question")
-
-    # Handle form submission
-    if submit_button:
-        # Validation checks for form fields
-        # if not label_description.strip():
-        #     st.warning("Please provide a question description.")
-        if not question_title.strip():
-            st.warning("Please provide a question title.")
-        elif st.session_state.selected_question_type in ["Label", "Multi-label"] and not labels:
-            st.warning("Please define at least one label.")
-        else:
-            # Add question details to session state
-            question_data = {
-                'question_title': question_title,
-                "label_description": label_description,
-                "question_type": st.session_state.selected_question_type,
-                "labels": labels if st.session_state.selected_question_type in ["Label", "Multi-label"] else None,
-            }
-            st.session_state.questions.append(question_data)
-
-            st.success("Question added successfully!")
-            
-            # Clear form fields only after valid submission
-            st.session_state.form_data_title = ""
-            st.session_state.form_data_description = ""
-            st.session_state.form_data_labels = ""
-
-            # Update the `labels_input_key` dynamically to reset the text input
-            st.session_state.labels_input_key = f"labels_input_{len(st.session_state.questions)}"
-
-            # Optionally, re-run the page
-            st.rerun()
-
-    # If validation fails, retain the data in the form
+def display_upload_to_argilla_page():
+    st.title("Upload to Argilla")
+    
+    # Load the dataset from session state
+    dataset = st.session_state.get("dataset", pd.DataFrame())
+    selected_columns = st.session_state.get("selected_columns", [])
+    questions = st.session_state.get("questions", [])
+    
+    # If no dataset or questions, display a warning
+    if dataset.empty or not questions:
+        st.warning("No labeled dataset or questions found. Please ensure labeling is completed before uploading.")
+        return
+    
+    st.markdown("#### Upload the labeled dataset to the Argilla server.")
+    
+    # Check if selected columns are available, otherwise show a warning
+    if selected_columns:
+        st.write("Selected Columns Preview:")
+        st.write(dataset[selected_columns].head())  # Show selected columns
     else:
-        # Store the current form inputs in session state if user hasn't clicked submit
-        st.session_state.form_data_title = question_title
-        st.session_state.form_data_description = label_description
-        st.session_state.form_data_labels = ", ".join(labels)
+        st.warning("No columns selected. Please select at least one column on the upload page.")
 
-    # Display the list of added questions
-    if st.session_state.questions:
-        st.markdown("### Added Questions")
-        for idx, question in enumerate(st.session_state.questions, start=1):
-            st.markdown(f"**{idx}. Question title:** {question['question_title']}")
-            st.markdown(f"**Question Description:** {question['label_description']}")
-            st.markdown(f"**Question Type:** {question['question_type']}")
-            if question['question_type'] in ["Label", "Multi-label"]:
-                st.markdown(f"**Labels:** {', '.join(question['labels'])}")
-            st.markdown("---")
+    st.write("Labeled Dataset Preview:")
+    st.write(dataset.head())  # Show the entire dataset preview
 
-    # Show "Next" button to navigate to the labeling page (third page)
-    if st.button("Next"):
-        if st.session_state.questions:
-            st.session_state.page = 3  # Move to the labeling page
-            st.rerun()  # Re-run the app to update page state
-        else:
-            st.warning("Please add at least one question before proceeding.")
+    # Additional inputs for Argilla upload
+    guidelines = st.text_area("Write labeling guidelines:", value="")
+    api_url = st.text_input("Argilla Server URL", value="https://dhruvil2004-my-argilla.hf.space/")
+    api_key = st.text_input("Argilla API Key", type="password")
+    dataset_name = st.text_input("Dataset Name", value="labeled_dataset")
+    workspace_name = st.text_input("Workspace Name", value="argilla")
+
+    # Upload button
+    if st.button("Upload to Argilla"):
+        try:
+            # Initialize Argilla client
+            client = rg.Argilla(api_url=api_url, api_key=api_key)
+            
+            # Prepare records for upload to Argilla
+            records = []
+            for idx, row in dataset.iterrows():
+                record = {}
+                for column in selected_columns:
+                    record[column] = row[column]  # Add each selected column's data
+
+                annotations = {}
+                # Add annotations for each question
+                for question in questions:
+                    question_title = question['question_title']
+                    question_type = question['question_type']
+                    label = row.get(question_title)  # Get the label selected during labeling
+
+                    # Handle Label questions (single label)
+                    if question_type == "Label":
+                        annotations[question_title] = label  # Single label
+
+                    # Handle Multi-label questions (multiple labels)
+                    elif question_type == "Multi-label":
+                        if isinstance(label, list):
+                            annotations[question_title] = ", ".join(label)  # Multi-label as comma-separated
+                        else:
+                            annotations[question_title] = label  # Single value fallback (if any issue with multi-label)
+
+                    # Handle Rating questions (numeric rating)
+                    elif question_type == "Rating":
+                        annotations[question_title] = label  # Rating value (assumed to be a number)
+
+                record["annotations"] = annotations
+                records.append(record)
+            
+            # Define TextFields for each selected column
+            fields = []
+            for column in selected_columns:
+                fields.append(rg.TextField(name=column, title=column, use_markdown=False))
+            
+            # Define the questions (assuming labels are defined for Label or Multi-label questions)
+            label_questions = []
+            for question in questions:
+                question_type = question["question_type"]
+                if question_type == "Label":
+                    if question["label_description"] != "":
+                        label_questions.append(
+                            rg.LabelQuestion(
+                                name=question["question_title"],
+                                labels=question["labels"],
+                                description=question["label_description"]
+                            )
+                        )
+                    else:#making description optional
+                        label_questions.append(
+                        rg.LabelQuestion(
+                            name=question["question_title"],
+                            labels=question["labels"],
+                            #description=question["label_description"]
+                        )
+                    )
+                
+                elif question_type == "Rating":
+                    # For rating, use RatingQuestion with options 1-5
+                    if question["label_description"] != "": 
+                        label_questions.append(
+                            rg.RatingQuestion(
+                                name=question["question_title"],
+                                values=[1,2,3,4,5],
+                                description=question["label_description"]  # Assuming a 1-5 rating scale
+                                
+                            )
+                        )
+                    else:#making description optional
+                        label_questions.append(
+                            rg.RatingQuestion(
+                                name=question["question_title"],
+                                values=[1,2,3,4,5],
+                                #description=question["label_description"]  # Assuming a 1-5 rating scale
+                                
+                            )
+                        )
+
+                elif question_type == "Multi-label":
+                    if question["label_description"] != "": 
+                        label_questions.append(
+                            rg.MultiLabelQuestion(
+                                name=question['question_title'],
+                                labels=question['labels'],
+                                description=question["label_description"]
+                            )
+                        )
+                    else:#making description optional
+                        label_questions.append(
+                            rg.MultiLabelQuestion(
+                                name=question['question_title'],
+                                labels=question['labels'],
+                                #description=question["label_description"]
+                            )
+                        )
+
+
+            # Setup dataset settings with fields (TextFields for columns) and questions
+            settings = rg.Settings(
+                guidelines=guidelines,
+                fields=fields,  # Include TextFields for all selected columns
+                questions=label_questions  # Include the questions defined in the question page
+            )
+
+            # Create or get the dataset on Argilla
+            dataset = rg.Dataset(name=dataset_name, workspace=workspace_name, settings=settings)
+            dataset.create()
+            
+            # Log the records to Argilla
+            dataset.records.log(records)
+
+            # Display success message
+            st.success("Data uploaded to Argilla successfully!")
+
+        except Exception as e:
+            st.error(f"Failed to upload to Argilla: {str(e)}")
