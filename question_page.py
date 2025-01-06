@@ -38,7 +38,7 @@ def display_question_page():
         key="question_title"
     )
     label_description = st.text_input(
-        "Describe Question information (e.g., overall Quality of LLM Response):",
+        "Describe Question information (e.g., overall Quality of LLM Response)(Optional):",
         value=st.session_state.form_data_description,
         key="label_description"
     )
