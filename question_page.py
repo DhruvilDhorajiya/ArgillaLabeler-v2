@@ -60,6 +60,8 @@ def display_question_page():
     # Handle form submission
     if submit_button:
         # Validation checks for form fields
+        # if not label_description.strip():
+        #     st.warning("Please provide a question description.")
         if not question_title.strip():
             st.warning("Please provide a question title.")
         elif st.session_state.selected_question_type in ["Label", "Multi-label"] and not labels:
